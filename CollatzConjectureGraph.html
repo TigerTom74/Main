@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Collatz Conjecture Graph</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 10px;
+            background-color: black;
+            color: white;
+            text-align: center;
+        }
+        .container {
+            display: flex;
+            justify-content: center;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        .table-container {
+            width: 20%;
+            max-width: 300px;
+            margin-bottom: 20px;
+            color: white;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0 auto;
+            color: white;
+        }
+        table, th, td {
+            border: 1px solid white;
+        }
+        th {
+            background-color: #444;
+            font-weight: bold;
+            padding: 10px;
+        }
+        td {
+            padding: 5px;
+            text-align: left;
+        }
+        canvas {
+            width: 75%;
+            max-width: 1000px;
+            height: auto;
+            max-height: 500px;
+        }
+        .controls {
+            margin: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Collatz Conjecture Graph</h1>
+    <div class="container">
+        <div class="table-container">
+            <table>
+                <tr>
+                    <th colspan="2">Interesting Points</th>
+                </tr>
+                <tr>
+                    <td>Current Seed</td>
+                    <td id="currentSeed">N/A</td>
+                </tr>
+                <tr>
+                    <td>Seed w/ most steps</td>
+                    <td id="mostStepsSeed">N/A</td>
+                </tr>
+                <tr>
+                    <td>Seed w/ highest peak</td>
+                    <td id="highestPeakSeed">N/A</td>
+                </tr>
+                <tr>
+                    <td>Highest Peak</td>
+                    <td id="highestPeak">N/A</td>
+                </tr>
+            </table>
+        </div>
+        <canvas id="collatzChart"></canvas>
+    </div>
+    <div class="controls">
+        <label for="maxGraphs">Max Graphs: </label>
+        <input type="number" id="maxGraphs" value="5" min="1" max="10" />
+        <label for="interval">Interval (ms): </label>
+        <input type="number" id="interval" value="5000" min="1000" />
+        <button onclick="toggleLoop()">Pause/Resume</button>
+        <button onclick="resetChart()">Reset</button>
+    </div>
+
+    <script>
+        const API_KEY = 'AIzaSyDPGBQNATIwMn_H9XZ6Tarj8yIclV-ZNSE';
+        const SPREADSHEET_ID = '1xMyK86tPgfbhti8Dq3vyz8p5OFvCckuE_kylCpg2ytI';
+        const RANGE = 'Sheet1!A:E';
+
+        let isLooping = true;
+        let chart;
+        let currentSeed = 1;
+        let loopInterval;
+
+        // Initialize Chart.js
+        function initChart() {
+            const ctx = document.getElementById('collatzChart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: { labels: [], datasets: [] },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Step', color: 'white' },
+                            ticks: { color: 'white' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Value', color: 'white' },
+                            ticks: { color: 'white' },
+                            beginAtZero: true
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: 'white' } }
+                    }
+                }
+            });
+        }
+
+        // Fetch data from Google Sheets
+        async function fetchData() {
+            const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${RANGE}?key=${API_KEY}`);
+            const data = await response.json();
+            console.log(data.values); // Log data for debugging
+        }
+
+        // Send data to Google Sheets
+        async function sendData(seed, steps, peak, path) {
+            const newData = [
+                [seed, seed % 2 === 0 ? 'Even' : 'Odd', steps, peak, path.join(', ')]
+            ];
+            await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${RANGE}:append?valueInputOption=USER_ENTERED&key=${API_KEY}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ values: newData })
+            });
+        }
+
+        // Calculate the Collatz sequence and update table
+        function collatzSequence(seed) {
+            let sequence = [seed];
+            let steps = 0;
+            let peak = seed;
+            let n = seed;
+            
+            while (n !== 1) {
+                n = (n % 2 === 0) ? n / 2 : 3 * n + 1;
+                peak = Math.max(peak, n);
+                sequence.push(n);
+                steps++;
+            }
+            
+            updateTable(seed, steps, peak);
+            sendData(seed, steps, peak, sequence);
+            return { sequence, steps, peak };
+        }
+
+        // Add dataset to chart with dynamic color
+        function addDataset(seed, sequence, color) {
+            if (chart.data.datasets.length >= document.getElementById('maxGraphs').value) {
+                chart.data.datasets.shift(); // Remove oldest dataset to respect maxGraphs
+            }
+            chart.data.datasets.push({
+                label: `Seed ${seed}`,
+                data: sequence,
+                borderColor: color,
+                fill: false,
+                borderWidth: 2
+            });
+            chart.update();
+        }
+
+        // Adjust color opacity for fading
+        function adjustOpacity(color, opacity) {
+            const rgba = color.replace(/rgba\((.*),[\d.]+\)/, `rgba($1, ${opacity})`);
+            return rgba;
+        }
+
+        // Update the table data
+        function updateTable(seed, steps, peak) {
+            document.getElementById("currentSeed").textContent = seed;
+            // Additional logic to update other fields as per calculations
+        }
+
+        function getColor(seed) {
+            return (seed % 2 === 0) ? `rgba(255, 255, 0, 1)` : `rgba(255, 0, 0, 1)`;
+        }
+
+        function loopSeeds() {
+            const { sequence, steps, peak } = collatzSequence(currentSeed);
+            addDataset(currentSeed, sequence, getColor(currentSeed));
+            currentSeed++;
+        }
+
+        function toggleLoop() {
+            isLooping = !isLooping;
+            if (isLooping) startLoop();
+            else clearInterval(loopInterval);
+        }
+
+        function startLoop() {
+            clearInterval(loopInterval);
+            loopInterval = setInterval(loopSeeds, document.getElementById('interval').value);
+        }
+
+        // Initialize chart and fetch data when the page loads
+        initChart();
+        fetchData();
+        startLoop();
+    </script>
+</body>
+</html>
